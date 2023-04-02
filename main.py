@@ -11,9 +11,10 @@ from flask_gravatar import Gravatar
 from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField, PasswordField, EmailField
 from wtforms.validators import DataRequired
+import os
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'Your-Secret-key'
+app.config['SECRET_KEY'] = os.environ["BLOG_SECRET_KEY"]
 ckeditor = CKEditor(app)
 boootstrap = Bootstrap5(app)
 login_manager = LoginManager(app)
@@ -42,7 +43,7 @@ def admin_only(f):
 
 
 ##CONNECT TO DB
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///blog.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ["BLOG_DATABASE_URL"]
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
