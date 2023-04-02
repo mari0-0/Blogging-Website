@@ -13,7 +13,7 @@ from wtforms import StringField, SubmitField, PasswordField, EmailField
 from wtforms.validators import DataRequired
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = '8BYkEfBA6O6donzWlSihBXox7C0sKR6b'
+app.config['SECRET_KEY'] = 'Your-Secret-key'
 ckeditor = CKEditor(app)
 boootstrap = Bootstrap5(app)
 login_manager = LoginManager(app)
@@ -111,7 +111,6 @@ def register():
     form = RegisterForm()
     if form.validate_on_submit():
         user_exist = User.query.filter_by(email=form.email.data).first()
-        print(user_exist)
         if not user_exist:
             new_user = User(
                 email=form.email.data,
