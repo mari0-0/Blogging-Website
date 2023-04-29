@@ -1,7 +1,7 @@
-from flask import Flask, render_template, redirect, url_for, flash, abort
+from flask import Flask, render_template, redirect, url_for, flash, abort, request, Blueprint
 from functools import wraps
 from flask_bootstrap import Bootstrap5
-from flask_ckeditor import CKEditor,CKEditorField
+from flask_ckeditor import CKEditor, CKEditorField
 from datetime import date
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_sqlalchemy import SQLAlchemy
@@ -12,12 +12,20 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField, PasswordField, EmailField
 from wtforms.validators import DataRequired
 import os
+from flask_admin import Admin
+from flask_admin.contrib.sqla import ModelView
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ["BLOG_SECRET_KEY"]
+app.config['FLASK_ADMIN_SWATCH'] = 'lumen'  # Optional: change the theme of the admin panel
 ckeditor = CKEditor(app)
 boootstrap = Bootstrap5(app)
 login_manager = LoginManager(app)
+
+admin = Admin(app, template_mode='bootstrap3', name='Admin')
+user_panel = Admin(app, template_mode='bootstrap3', name='User Panel', endpoint='UserPanel', url='/userpanel')
+
+error_pages = Blueprint('error_pages', __name__)
 gravatar = Gravatar(app,
                     size=100,
                     rating='g',
@@ -27,7 +35,8 @@ gravatar = Gravatar(app,
                     use_ssl=False,
                     base_url=None)
 
-#LOAD USER
+
+# LOAD USER
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(user_id)
@@ -39,11 +48,17 @@ def admin_only(f):
         if current_user.id != 1:
             return abort(403)
         return f(*args, **kwargs)
+
     return decorator_fn
 
 
+@error_pages.app_errorhandler(403)
+def forbidden(error):
+    return render_template('403.html'), 403
+
+
 ##CONNECT TO DB
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ["BLOG_DATABASE_URL"]
+app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///blog.db"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -57,6 +72,7 @@ class User(UserMixin, db.Model):
     name = db.Column(db.String(250), nullable=False)
     posts = db.relationship('BlogPost', back_populates='author')
     comments = db.relationship("Comment", back_populates='name')
+
 
 
 class BlogPost(db.Model):
@@ -82,7 +98,7 @@ class Comment(db.Model):
     parent_post = db.relationship("BlogPost", back_populates='comments')
 
 
-#FORMS
+# FORMS
 class RegisterForm(FlaskForm):
     email = EmailField(label='Email', validators=[DataRequired()], render_kw={'class': 'mb-5'})
     password = PasswordField(label='Password', validators=[DataRequired()], render_kw={'class': 'mb-5'})
@@ -99,6 +115,62 @@ class LoginForm(FlaskForm):
 class CommentForm(FlaskForm):
     comment = CKEditorField(label='Add Comment', validators=[DataRequired()], render_kw={'class': 'mb-5'})
     submit = SubmitField("Add Comment")
+
+
+class UserView1(ModelView):
+    column_list = ['id', 'email', 'password', 'name', 'posts', 'comments']
+    column_searchable_list = ('name', 'email')
+    column_filters = ('name', 'email', 'id')
+    form_widget_args = {
+        'password': {'type': 'password'}
+    }
+
+    def is_accessible(self):
+        return current_user.is_authenticated  # Only allow authenticated users to access the user panel
+
+
+class UserView2(ModelView):
+    column_list = ['text']
+
+    def is_accessible(self):
+        return current_user.is_authenticated  # Only allow authenticated users to access the user panel
+
+    def get_query(self):
+        if current_user.is_authenticated:
+            # Filter the query to only show the current user's data
+            return self.session.query(self.model).filter_by(user_id=current_user.id)
+        else:
+            return self.session.query(self.model).none()  # Return an empty query for non-authenticated users
+
+    def on_model_change(self, form, model, is_created):
+        # Set the user ID to the currently logged-in user's ID when creating a new record
+        if is_created:
+            model.id = current_user.id
+
+admin.add_views(
+    UserView1(User, db.session),
+    ModelView(BlogPost, db.session),
+)
+
+
+user_panel.add_views(
+    UserView2(Comment, db.session),
+)
+
+
+def is_admin():
+    if current_user.id == 1:
+        return True
+    return False
+
+
+@app.before_request
+def check_admin():
+    try:
+        if request.path.startswith('/admin') and not is_admin():
+            return abort(403)
+    except AttributeError:
+        return abort(403)
 
 
 @app.route('/')
@@ -130,6 +202,8 @@ def register():
 
 @app.route('/login', methods=["POST", "GET"])
 def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('get_all_posts'))
     form = LoginForm()
     if form.validate_on_submit():
         user = User.query.filter_by(email=form.email.data).first()
@@ -169,7 +243,8 @@ def show_post(post_id):
         else:
             flash("You need to login to comment")
             return redirect(url_for('login'))
-    return render_template("post.html", post=requested_post, login_status=current_user.is_authenticated, form=comment_form, comments=comments)
+    return render_template("post.html", post=requested_post, login_status=current_user.is_authenticated,
+                           form=comment_form, comments=comments)
 
 
 @app.route("/about")
@@ -233,5 +308,11 @@ def delete_post(post_id):
     return redirect(url_for('get_all_posts'))
 
 
+@app.route('/userpanel')
+@login_required
+def user_panel():
+    return redirect('/userpanel/')
+
+app.register_blueprint(error_pages)
 if __name__ == "__main__":
     app.run(debug=True)
