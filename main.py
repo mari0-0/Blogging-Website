@@ -3,6 +3,8 @@ from functools import wraps
 from flask_bootstrap import Bootstrap5
 from flask_ckeditor import CKEditor, CKEditorField
 from datetime import date
+
+from markupsafe import Markup
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin, login_user, LoginManager, login_required, current_user, logout_user
@@ -58,7 +60,7 @@ def forbidden(error):
 
 
 ##CONNECT TO DB
-app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///blog.db"
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ["BLOG_DATABASE_URL"]
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -72,7 +74,6 @@ class User(UserMixin, db.Model):
     name = db.Column(db.String(250), nullable=False)
     posts = db.relationship('BlogPost', back_populates='author')
     comments = db.relationship("Comment", back_populates='name')
-
 
 
 class BlogPost(db.Model):
@@ -94,7 +95,7 @@ class Comment(db.Model):
     text = db.Column(db.String, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     name = db.relationship("User", back_populates='comments')
-    post_id = db.Column(db.String, db.ForeignKey('blog_post.id'))
+    post_id = db.Column(db.Integer, db.ForeignKey('blog_post.id'))
     parent_post = db.relationship("BlogPost", back_populates='comments')
 
 
@@ -129,8 +130,15 @@ class UserView1(ModelView):
         return current_user.is_authenticated  # Only allow authenticated users to access the user panel
 
 
+with app.app_context():
+    db.create_all()
+
+
 class UserView2(ModelView):
-    column_list = ['text']
+    column_list = ('text', 'name.name')
+    column_formatters = {
+        'text': lambda v, c, m, p: Markup(m.text)
+    }
 
     def is_accessible(self):
         return current_user.is_authenticated  # Only allow authenticated users to access the user panel
@@ -147,11 +155,11 @@ class UserView2(ModelView):
         if is_created:
             model.id = current_user.id
 
+
 admin.add_views(
     UserView1(User, db.session),
     ModelView(BlogPost, db.session),
 )
-
 
 user_panel.add_views(
     UserView2(Comment, db.session),
@@ -159,8 +167,11 @@ user_panel.add_views(
 
 
 def is_admin():
-    if current_user.id == 1:
-        return True
+    try:
+        if current_user.id == 1:
+            return True
+    except AttributeError:
+        pass
     return False
 
 
@@ -221,8 +232,9 @@ def login():
 
 @app.route('/logout')
 def logout():
+    url = request.args.get('url')
     logout_user()
-    return redirect(url_for('get_all_posts'))
+    return redirect(url)
 
 
 @app.route("/post/<int:post_id>", methods=["POST", "GET"])
@@ -244,7 +256,7 @@ def show_post(post_id):
             flash("You need to login to comment")
             return redirect(url_for('login'))
     return render_template("post.html", post=requested_post, login_status=current_user.is_authenticated,
-                           form=comment_form, comments=comments)
+                           form=comment_form, comments=comments, admin=is_admin())
 
 
 @app.route("/about")
@@ -313,6 +325,7 @@ def delete_post(post_id):
 def user_panel():
     return redirect('/userpanel/')
 
+
 app.register_blueprint(error_pages)
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0")
